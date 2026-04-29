@@ -662,6 +662,11 @@ export default function QueenDM() {
             queenAboutToResumeRef.current = false;
             break;
           }
+          // Drop the queen's question into the transcript so it lives
+          // alongside the user's answer when scrolling back. Synthesized
+          // by replayEvent above; upsert by id so cold-replay doesn't
+          // duplicate it.
+          for (const m of emittedMessages) upsertMessage(m);
           setAwaitingInput(true);
           setIsTyping(false);
           setIsStreaming(false);

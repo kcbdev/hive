@@ -182,8 +182,13 @@ def _strip_internal_tags_from_snapshot(snapshot: str) -> str:
     return cleaned
 
 
-async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
-    """Describe images using the best available vision model."""
+async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """Describe images using the best available vision model.
+
+    Returns ``(description, model)`` on success — the formatted
+    placeholder text plus the model id that produced it — or ``None``
+    when every candidate fails or no API key is configured.
+    """
     import litellm
 
     blocks: list[dict[str, Any]] = [
@@ -216,7 +221,7 @@ async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str |
             if description:
                 count = len(image_content)
                 label = "image" if count == 1 else f"{count} images"
-                return f"[{label} attached  — description: {description}]"
+                return f"[{label} attached  — description: {description}]", model
         except Exception as exc:
             logger.debug("Vision fallback model '%s' failed: %s", model, exc)
             continue
@@ -247,21 +252,22 @@ def _vision_fallback_active(model: str | None) -> bool:
 async def _captioning_chain(
     intent: str,
     image_content: list[dict[str, Any]],
-) -> str | None:
+) -> tuple[str, str] | None:
     """Two-stage caption chain used by the agent-loop tool-result hook.
 
     Stage 1: configured ``vision_fallback`` model with intent + images.
     Stage 2: generic-caption rotation (gpt-4o-mini → claude-3-haiku
     → gemini-flash) when stage 1 is unconfigured or fails.
 
-    Returns the caption text or None if both stages fail. Caller is
-    responsible for the placeholder-on-None and the splice into the
-    persisted tool-result content.
+    Returns ``(caption, model)`` — the caption text paired with the
+    model id that produced it — or ``None`` if both stages fail.
+    Caller is responsible for the placeholder-on-None and the splice
+    into the persisted tool-result content.
     """
-    caption = await caption_tool_image(intent, image_content)
-    if not caption:
-        caption = await _describe_images_as_text(image_content)
-    return caption
+    result = await caption_tool_image(intent, image_content)
+    if not result:
+        result = await _describe_images_as_text(image_content)
+    return result
 
 
 # Pattern for detecting context-window-exceeded errors across LLM providers.
@@ -3499,14 +3505,17 @@ class AgentLoop(AgentProtocol):
                 # this tool).
                 vision_fallback_marker: str | None = None
                 if image_content and tc.tool_use_id in caption_tasks:
-                    caption = await caption_tasks.pop(tc.tool_use_id)
-                    if caption:
+                    caption_result = await caption_tasks.pop(tc.tool_use_id)
+                    if caption_result:
+                        caption, vision_model = caption_result
                         vision_fallback_marker = f"[vision-fallback caption]\n{caption}"
                         logger.info(
-                            "vision_fallback: captioned %d image(s) for tool '%s' (model '%s' routed through fallback)",
+                            "vision_fallback: captioned %d image(s) for tool '%s' "
+                            "(main model '%s' routed through fallback model '%s')",
                             len(image_content),
                             tc.tool_name,
                             ctx.llm.model if ctx.llm else "?",
+                            vision_model,
                         )
                     else:
                         vision_fallback_marker = "[image stripped — vision fallback exhausted]"

@@ -162,7 +162,7 @@ async def drain_injection_queue(
     conversation: NodeConversation,
     *,
     ctx: NodeContext,
-    describe_images_as_text_fn: (Callable[[list[dict[str, Any]]], Awaitable[str | None]] | None) = None,
+    describe_images_as_text_fn: (Callable[[list[dict[str, Any]]], Awaitable[tuple[str, str] | None]] | None) = None,
 ) -> int:
     """Drain all pending injected events as user messages. Returns count."""
     count = 0
@@ -185,10 +185,14 @@ async def drain_injection_queue(
                     ctx.llm.model,
                 )
                 if describe_images_as_text_fn is not None:
-                    description = await describe_images_as_text_fn(image_content)
-                    if description:
+                    described = await describe_images_as_text_fn(image_content)
+                    if described:
+                        description, vision_model = described
                         content = f"{content}\n\n{description}" if content else description
-                        logger.info("[drain] image described as text via vision fallback")
+                        logger.info(
+                            "[drain] image described as text via vision fallback (model '%s')",
+                            vision_model,
+                        )
                     else:
                         logger.info("[drain] no vision fallback available; images dropped")
                 image_content = None

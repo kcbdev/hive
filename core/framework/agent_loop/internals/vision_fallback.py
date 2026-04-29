@@ -156,10 +156,11 @@ async def caption_tool_image(
     image_content: list[dict[str, Any]],
     *,
     timeout_s: float = 30.0,
-) -> str | None:
+) -> tuple[str, str] | None:
     """Caption the given images using the configured ``vision_fallback`` model.
 
-    Returns the model's text response on success, or ``None`` on any
+    Returns ``(caption, model)`` on success — the model's text response
+    paired with the model id that produced it — or ``None`` on any
     failure (no config, no API key, timeout, exception, empty
     response). Callers chain to the next stage of the fallback on None.
 
@@ -241,7 +242,9 @@ async def caption_tool_image(
     except Exception:
         pass
 
-    return caption
+    if caption is None:
+        return None
+    return caption, model
 
 
 __all__ = ["caption_tool_image", "extract_intent_for_tool"]

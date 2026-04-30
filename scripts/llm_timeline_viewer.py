@@ -505,91 +505,231 @@ def _render_html(summaries: list[SessionSummary], initial_session_id: str) -> st
      * the assistant text and one event per tool_call from this turn.
      */
     function buildEvents(records) {{
-      const events = [];
-      // Dedupe by content-derived key, NOT array position. Context pruning
-      // (see agent_loop DS-13: prune at ~60% usage) shrinks the messages
-      // array between turns, so a position-based watermark drops messages
-      // added after pruning. Hashing each message lets us anchor every
-      // unique message to the FIRST turn it appeared in.
-      const seenMsg = new Set();
-      const stableKey = (m) => {{
-        const role = String(m.role || "");
-        let body = "";
-        try {{ body = typeof m.content === "string" ? m.content : JSON.stringify(m.content); }}
-        catch {{ body = ""; }}
-        // First 400 chars is enough to disambiguate distinct messages
-        // without holding huge strings in the Set.
-        return role + "\\x1f" + body.slice(0, 400) + "\\x1f" + body.length;
+      // Build a global tool_use_id -> {{startTs, durationS, toolName, isError}}
+      // map across ALL turns. The records use OpenAI-style envelopes:
+      //   - assistant message: {{role, content: null, tool_calls: [{{id, function:{{name,arguments}}}}]}}
+      //   - tool message:      {{role:"tool", tool_call_id, content}}
+      // rec.tool_calls carries each invocation's real start_timestamp + duration_s,
+      // which is what we need so tool_uses sit at their actual execution time
+      // (not the much later "turn was logged" wall clock) and tool_results
+      // sit just after their matching call.
+      const toolMeta = new Map();
+      for (const rec of records) {{
+        for (const tc of (rec.tool_calls || [])) {{
+          const id = tc.tool_use_id || tc.id;
+          if (!id) continue;
+          toolMeta.set(id, {{
+            startTs: tc.start_timestamp || rec.timestamp || "",
+            durationS: typeof tc.duration_s === "number" ? tc.duration_s : 0,
+            toolName: tc.tool_name || (tc.function && tc.function.name) || "?",
+            isError: !!tc.is_error,
+          }});
+        }}
+      }}
+      const addSeconds = (iso, sec) => {{
+        if (!iso) return iso;
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        d.setTime(d.getTime() + (sec || 0) * 1000);
+        return d.toISOString();
       }};
+
+      const events = [];
+      // Dedupe by content-derived key (not array position): context pruning
+      // shrinks `messages` between turns and a watermark drops everything
+      // after the cut. Hashing anchors each unique message/call/result to
+      // the FIRST turn it appeared in.
+      const seenMsg = new Set();
+      const stableMsgKey = (m) => {{
+        const role = String(m.role || "");
+        const tcid = m.tool_call_id || "";
+        let body = "";
+        try {{ body = typeof m.content === "string" ? m.content : JSON.stringify(m); }}
+        catch {{ body = ""; }}
+        return role + "\\x1f" + tcid + "\\x1f" + body.slice(0, 600);
+      }};
+      const seenAsstText = new Set();
+      const seenToolUse = new Set();
+
       for (let i = 0; i < records.length; i++) {{
         const rec = records[i];
         const msgs = Array.isArray(rec.messages) ? rec.messages : [];
+
+        // Per-turn timestamp inference: tool_use / tool_result have REAL
+        // timestamps (from rec.tool_calls); user / asst text only have the
+        // turn-record timestamp (the "logged at" wall clock, much later
+        // than when the event actually happened). Forward+backward fill from
+        // known tool times so neighbors display monotonically.
+        const msgTs = new Array(msgs.length).fill(null);
         for (let j = 0; j < msgs.length; j++) {{
           const m = msgs[j];
-          const key = stableKey(m);
+          if (m.role === "tool") {{
+            const meta = toolMeta.get(m.tool_call_id || "");
+            if (meta) msgTs[j] = addSeconds(meta.startTs, meta.durationS);
+          }} else if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length) {{
+            const meta = toolMeta.get(m.tool_calls[0].id || "");
+            if (meta) msgTs[j] = meta.startTs;
+          }}
+        }}
+        let lastKnown = null;
+        for (let j = 0; j < msgs.length; j++) {{
+          if (msgTs[j] !== null) lastKnown = msgTs[j];
+          else if (lastKnown !== null) msgTs[j] = lastKnown;
+        }}
+        let nextKnown = null;
+        for (let j = msgs.length - 1; j >= 0; j--) {{
+          if (msgTs[j] !== null) nextKnown = msgTs[j];
+          else if (nextKnown !== null) msgTs[j] = nextKnown;
+        }}
+        for (let j = 0; j < msgs.length; j++) {{
+          if (msgTs[j] === null) msgTs[j] = rec.timestamp || "";
+        }}
+
+        // Walk messages in natural (chronological) order so user → asst text
+        // → tool_use → tool_result land in the order they happened.
+        for (let j = 0; j < msgs.length; j++) {{
+          const m = msgs[j];
+          const key = stableMsgKey(m);
           if (seenMsg.has(key)) continue;
           seenMsg.add(key);
           const role = String(m.role || "user");
-          let kind = "user";
-          if (role === "tool") kind = "tool_result";
-          else if (role === "system") kind = "system";
-          else if (role === "assistant") {{
-            // Assistant messages in input echo a prior turn's response,
-            // already represented by that turn's output events.
+          const ts = msgTs[j];
+
+          if (role === "user") {{
+            events.push({{
+              id: `t${{i}}-m${{j}}`,
+              kind: "user", role: "user", label: "user",
+              preview: preview(contentToText(m.content)),
+              timestamp: ts,
+              iteration: rec.iteration ?? "?",
+              turnIndex: i, messageIndex: j,
+              scrollTarget: `msg-${{j}}`,
+            }});
             continue;
           }}
-          events.push({{
-            id: `t${{i}}-m${{j}}`,
-            kind,
-            role,
-            label: kind === "tool_result" ? "tool_result" : role,
-            preview: preview(contentToText(m.content)),
-            timestamp: rec.timestamp || "",
-            iteration: rec.iteration ?? "?",
-            turnIndex: i,
-            messageIndex: j,
-            scrollTarget: `msg-${{j}}`,
-          }});
+
+          if (role === "system") {{
+            events.push({{
+              id: `t${{i}}-m${{j}}`,
+              kind: "system", role: "system", label: "system",
+              preview: preview(contentToText(m.content)),
+              timestamp: ts,
+              iteration: rec.iteration ?? "?",
+              turnIndex: i, messageIndex: j,
+              scrollTarget: `msg-${{j}}`,
+            }});
+            continue;
+          }}
+
+          if (role === "tool") {{
+            const tcid = m.tool_call_id || "";
+            const meta = toolMeta.get(tcid);
+            events.push({{
+              id: `t${{i}}-m${{j}}`,
+              kind: "tool_result", role: "tool",
+              label: meta ? `tool_result · ${{meta.toolName}}` : "tool_result",
+              preview: preview(contentToText(m.content)),
+              timestamp: ts,
+              iteration: rec.iteration ?? "?",
+              turnIndex: i, messageIndex: j,
+              scrollTarget: `msg-${{j}}`,
+              isError: !!(meta && meta.isError),
+            }});
+            continue;
+          }}
+
+          if (role === "assistant") {{
+            const text = typeof m.content === "string" ? m.content : "";
+            if (text.trim()) {{
+              const k = text.slice(0, 400);
+              if (!seenAsstText.has(k)) {{
+                seenAsstText.add(k);
+                events.push({{
+                  id: `t${{i}}-m${{j}}-text`,
+                  kind: "assistant", role: "assistant", label: "assistant",
+                  preview: preview(text),
+                  timestamp: ts,
+                  iteration: rec.iteration ?? "?",
+                  turnIndex: i, messageIndex: j,
+                  scrollTarget: `msg-${{j}}`,
+                }});
+              }}
+            }}
+            const tcs = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+            for (let k = 0; k < tcs.length; k++) {{
+              const tc = tcs[k];
+              const tcid = tc.id || tc.tool_use_id || "";
+              if (tcid && seenToolUse.has(tcid)) continue;
+              if (tcid) seenToolUse.add(tcid);
+              const meta = toolMeta.get(tcid);
+              const name = (tc.function && tc.function.name) || (meta && meta.toolName) || tc.tool_name || "?";
+              let argsObj = {{}};
+              try {{
+                const raw = (tc.function && tc.function.arguments) || tc.tool_input || tc.input || {{}};
+                argsObj = typeof raw === "string" ? JSON.parse(raw) : raw;
+              }} catch {{}}
+              events.push({{
+                id: `t${{i}}-m${{j}}-tc${{k}}`,
+                kind: "tool_use", role: "assistant",
+                label: `tool_use · ${{name}}`,
+                preview: preview(JSON.stringify(argsObj)),
+                timestamp: meta ? meta.startTs : ts,
+                iteration: rec.iteration ?? "?",
+                turnIndex: i, messageIndex: j,
+                scrollTarget: `msg-${{j}}`,
+                toolName: name,
+                isError: !!(meta && meta.isError),
+              }});
+            }}
+          }}
         }}
-        // Assistant text output (if any).
+
+        // The FINAL LLM response of this turn is captured separately in
+        // rec.assistant_text + rec.tool_calls; it only enters `messages` on
+        // the NEXT turn. Emit it now so it anchors to the correct turn.
         const at = String(rec.assistant_text || "").trim();
         if (at) {{
-          events.push({{
-            id: `t${{i}}-asst`,
-            kind: "assistant",
-            role: "assistant",
-            label: "assistant",
-            preview: preview(at),
-            timestamp: rec.timestamp || "",
-            iteration: rec.iteration ?? "?",
-            turnIndex: i,
-            messageIndex: -1,
-            scrollTarget: "assistant-text",
-          }});
+          const k = at.slice(0, 400);
+          if (!seenAsstText.has(k)) {{
+            seenAsstText.add(k);
+            events.push({{
+              id: `t${{i}}-asst`,
+              kind: "assistant", role: "assistant", label: "assistant",
+              preview: preview(at),
+              timestamp: rec.timestamp || "",
+              iteration: rec.iteration ?? "?",
+              turnIndex: i, messageIndex: -1,
+              scrollTarget: "assistant-text",
+            }});
+          }}
         }}
-        // Tool calls produced by this turn.
-        const tcs = Array.isArray(rec.tool_calls) ? rec.tool_calls : [];
-        for (let k = 0; k < tcs.length; k++) {{
-          const tc = tcs[k];
+        for (const tc of (rec.tool_calls || [])) {{
+          const tcid = tc.tool_use_id || tc.id || "";
+          if (tcid && seenToolUse.has(tcid)) continue;
+          if (tcid) seenToolUse.add(tcid);
           const name = tc.tool_name || (tc.function && tc.function.name) || "?";
           let inputPreview = "";
           try {{ inputPreview = preview(JSON.stringify(tc.tool_input || tc.input || {{}})); }} catch {{}}
           events.push({{
-            id: `t${{i}}-tc${{k}}`,
-            kind: "tool_use",
-            role: "assistant",
+            id: `t${{i}}-tc-${{tcid || Math.random()}}`,
+            kind: "tool_use", role: "assistant",
             label: `tool_use · ${{name}}`,
             preview: inputPreview,
             timestamp: tc.start_timestamp || rec.timestamp || "",
             iteration: rec.iteration ?? "?",
-            turnIndex: i,
-            messageIndex: -1,
-            scrollTarget: `tool-call-${{k}}`,
+            turnIndex: i, messageIndex: -1,
+            scrollTarget: "assistant-text",
             toolName: name,
             isError: !!tc.is_error,
           }});
         }}
       }}
+
+      // No cross-turn sort: messages are appended chronologically by the
+      // framework, dedup anchors each item to its first appearance, and
+      // tool_use events get their real start_timestamp directly. Sorting on
+      // mixed real/inferred timestamps risks reordering across turns where
+      // the inferred timestamps aren't reliable enough to trust.
       return events;
     }}
 

@@ -18,11 +18,9 @@ WORKDIR /app
 # Copy workspace files
 COPY . .
 
-# Install all workspace packages into the venv
-# Create venv and use its pip directly
-RUN uv venv .venv && \
-    uv pip install -e ./tools --python .venv/bin/python && \
-    uv pip install -e ./core --python .venv/bin/python
+# Install all workspace packages directly (no venv needed in container)
+RUN uv pip install -e ./tools && \
+    uv pip install -e ./core
 
 # Runtime stage
 FROM python:3.12-slim
@@ -42,7 +40,7 @@ RUN useradd -m -u 1000 hive && \
 WORKDIR /app
 
 # Copy installed packages from builder
-COPY --from=builder /app/.venv /app/.venv
+# Packages are installed to system Python (no venv)
 COPY --from=builder /app/core /app/core
 COPY --from=builder /app/tools /app/tools
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
@@ -57,8 +55,6 @@ RUN chmod +x /app/hive /app/quickstart.sh
 
 # Set environment variables
 ENV PYTHONPATH=/app/core:/app/exports:/app/tools \
-    VIRTUAL_ENV=/app/.venv \
-    PATH=/app/.venv/bin:$PATH \
     HIVE_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

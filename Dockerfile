@@ -42,8 +42,10 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/core /app/core
 COPY --from=builder /app/tools /app/tools
-COPY --from=builder /app/exports /app/exports
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
+
+# Create exports directory if it doesn't exist (may be empty in fresh clones)
+RUN mkdir -p /app/exports && chown hive:hive /app/exports
 
 # Copy Hive CLI scripts
 COPY --from=builder /app/hive /app/hive

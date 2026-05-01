@@ -21,8 +21,8 @@ COPY . .
 # Install all workspace packages using uv pip
 # This installs core and tools with all their dependencies into .venv
 RUN uv venv .venv && \
-    .venv/bin/pip install -e ./tools && \
-    .venv/bin/pip install -e ./core
+    uv pip install -e ./tools && \
+    uv pip install -e ./core
 
 # Runtime stage
 FROM python:3.12-slim

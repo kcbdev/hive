@@ -19,7 +19,8 @@ WORKDIR /app
 COPY . .
 
 # Install all workspace packages (core + tools)
-RUN uv sync --frozen 2>/dev/null || uv sync
+# Use --active to install all workspace members' dependencies
+RUN uv sync --frozen --active 2>/dev/null || uv sync --active
 
 # Runtime stage
 FROM python:3.12-slim
@@ -54,6 +55,7 @@ RUN chmod +x /app/hive /app/quickstart.sh
 
 # Set environment variables
 ENV PYTHONPATH=/app/core:/app/exports:/app/tools \
+    VIRTUAL_ENV=/app/.venv \
     PATH=/app/.venv/bin:$PATH \
     HIVE_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \

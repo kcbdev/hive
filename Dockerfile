@@ -19,8 +19,8 @@ WORKDIR /app
 COPY . .
 
 # Install all workspace packages directly (no venv needed in container)
-RUN uv pip install --system -e ./tools && \
-    uv pip install --system -e ./core
+RUN pip install -e ./tools && \
+    pip install -e ./core
 
 # Runtime stage
 FROM python:3.12-slim

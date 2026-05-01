@@ -18,11 +18,11 @@ WORKDIR /app
 # Copy workspace files
 COPY . .
 
-# Install all workspace packages using uv pip
-# This installs core and tools with all their dependencies into .venv
+# Install all workspace packages using uv pip into the venv
+# Use --python flag to install into the virtualenv
 RUN uv venv .venv && \
-    uv pip install -e ./tools && \
-    uv pip install -e ./core
+    uv pip install --python .venv/bin/python -e ./tools && \
+    uv pip install --python .venv/bin/python -e ./core
 
 # Runtime stage
 FROM python:3.12-slim

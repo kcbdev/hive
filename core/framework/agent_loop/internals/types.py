@@ -143,7 +143,7 @@ class LoopConfig:
     silent_tool_streak_threshold: int = 5
 
     # Per-tool-call timeout.
-    tool_call_timeout_seconds: float = 60.0
+    tool_call_timeout_seconds: float = 300.0
 
     # LLM stream inactivity watchdog. Split into two budgets so legitimate
     # slow TTFT on large contexts doesn't get mistaken for a dead connection.

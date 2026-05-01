@@ -1067,7 +1067,7 @@ class ColonyRuntime:
     async def wait_for_worker_reports(
         self,
         worker_ids: list[str],
-        timeout: float = 600.0,
+        timeout: float = 1800.0,
     ) -> list[dict[str, Any]]:
         """Block until every worker in ``worker_ids`` has reported.
 

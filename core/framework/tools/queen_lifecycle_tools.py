@@ -1079,7 +1079,7 @@ def register_queen_lifecycle_tools(
     # before the stop are preserved).
 
     _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0  # soft timeout (10 min)
-    _RUN_PARALLEL_HARD_TIMEOUT_CAP = 3600.0  # absolute safety-net cap (1 hour)
+    _RUN_PARALLEL_HARD_TIMEOUT_CAP = 7200.0  # absolute safety-net cap (1 hour)
 
     def _compute_hard_timeout(soft: float) -> float:
         """Default hard cutoff: max(4× soft, soft + 600), capped at 3600s."""

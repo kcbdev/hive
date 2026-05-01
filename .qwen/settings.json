@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__coolify__projects",
+      "mcp__coolify__server_resources",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(gh *)"
+    ]
+  },
+  "$version": 3
+}

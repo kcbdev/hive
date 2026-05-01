@@ -1,0 +1,110 @@
+version: 1
+name: film-pipeline
+mode: yaml-step
+description: One-command film generation. Specify story, genre, language, visual style - colony handles everything through final video.
+params:
+  story: "Ibn Battuta's journey through Damascus"
+  genre: "horror-comedy"
+  language: "Classical Arabic"
+  visual_style: "anime"
+  output_dir: "output/film"
+
+steps:
+  - id: generate-script
+    name: Generate Script
+    prompt: |
+      Write a film script in {{ language }} for a {{ genre }} about: {{ story }}
+      
+      Requirements:
+      - 5-7 scenes, each 15-30 seconds
+      - Each scene has [Visual: description] and [VO: narration in {{ language }}]
+      - Total runtime: 2-3 minutes
+      
+      Save to {{ output_dir }}/script.md
+    produces:
+      - "{{ output_dir }}/script.md"
+
+  - id: parse-scenes
+    name: Parse Scenes to JSON
+    prompt: |
+      Read {{ output_dir }}/script.md and extract to JSON:
+      
+      {
+        "scenes": [
+          {"scene_number": 1, "visual_description": "...", "voiceover_text": "...", "duration": 20}
+        ],
+        "language": "{{ language }}",
+        "visual_style": "{{ visual_style }}"
+      }
+      
+      Save to {{ output_dir }}/scenes.json
+    requires:
+      - generate-script
+    produces:
+      - "{{ output_dir }}/scenes.json"
+
+  - id: generate-voiceovers
+    name: Generate Voiceovers with ElevenLabs
+    prompt: |
+      For each scene in {{ output_dir }}/scenes.json:
+      1. Call ElevenLabs TTS API with voiceover_text in {{ language }}
+      2. Use multilingual model, voice suited for {{ genre }}
+      3. Save as {{ output_dir }}/audio/scene_001.mp3, scene_002.mp3, etc.
+      
+      Create {{ output_dir }}/audio_manifest.json with file list and durations.
+    requires:
+      - parse-scenes
+    produces:
+      - "{{ output_dir }}/audio_manifest.json"
+    iterate:
+      source: "{{ output_dir }}/scenes.json"
+      pattern: '"scene_number":\s*(\d+)'
+
+  - id: generate-video-clips
+    name: Generate Video Clips with Kling
+    prompt: |
+      For each scene in {{ output_dir }}/scenes.json:
+      1. Call Kling API with visual_description in {{ visual_style }} style
+      2. Duration from scene, 16:9 aspect ratio
+      3. Save as {{ output_dir }}/video/scene_001.mp4, scene_002.mp4, etc.
+      
+      Create {{ output_dir }}/video_manifest.json with file list.
+    requires:
+      - parse-scenes
+    produces:
+      - "{{ output_dir }}/video_manifest.json"
+    iterate:
+      source: "{{ output_dir }}/scenes.json"
+      pattern: '"scene_number":\s*(\d+)'
+
+  - id: assemble-final-video
+    name: Assemble Final Video
+    prompt: |
+      Using FFmpeg:
+      1. Combine each video clip with its audio track
+      2. Concatenate all scenes with 0.5s crossfade transitions
+      3. Normalize audio
+      4. Export {{ output_dir }}/final_film.mp4
+      5. Generate {{ output_dir }}/poster.jpg from best frame
+      
+      Execute the FFmpeg commands.
+    requires:
+      - generate-voiceovers
+      - generate-video-clips
+    produces:
+      - "{{ output_dir }}/final_film.mp4"
+      - "{{ output_dir }}/poster.jpg"
+
+  - id: validate-output
+    name: Validate Output
+    prompt: |
+      Run ffprobe on {{ output_dir }}/final_film.mp4 and verify:
+      - Video plays without errors
+      - Duration matches expected (2-3 minutes)
+      - Audio and video codecs are valid
+      
+      Create {{ output_dir }}/quality_report.md with results.
+    requires:
+      - assemble-final-video
+    produces:
+      - "{{ output_dir }}/quality_report.md"

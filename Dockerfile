@@ -18,9 +18,11 @@ WORKDIR /app
 # Copy workspace files
 COPY . .
 
-# Install all workspace packages (core + tools)
-# Use --active to install all workspace members' dependencies
-RUN uv sync --frozen --active 2>/dev/null || uv sync --active
+# Install all workspace packages using uv pip
+# This installs core and tools with all their dependencies into .venv
+RUN uv venv .venv && \
+    .venv/bin/pip install -e ./tools && \
+    .venv/bin/pip install -e ./core
 
 # Runtime stage
 FROM python:3.12-slim

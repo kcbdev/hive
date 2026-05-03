@@ -53,11 +53,15 @@ COPY --from=builder /app/quickstart.sh /app/quickstart.sh
 RUN pip install --no-cache-dir -e /app/core && \
     pip install --no-cache-dir -e /app/tools
 
+# Expose HTTP server port (Traefik routes to this)
+EXPOSE 8000
+
 # Set environment variables
 ENV PYTHONPATH=/app/core:/app/exports:/app/tools \
     HIVE_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
 
 # Switch to non-root user
 USER hive
@@ -65,6 +69,4 @@ USER hive
 # Create workspace directory
 RUN mkdir -p /home/hive/.hive/workspace
 
-# Default command — keep container alive (http server not started by default)
-# Override CMD in Coolify to: python -m framework serve [args]
-CMD ["tail", "-f", "/dev/null"]
+CMD ["hive", "serve", "--host", "0.0.0.0", "--port", "8000"]

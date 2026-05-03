@@ -19,8 +19,9 @@ WORKDIR /app
 COPY . .
 
 # Install all workspace packages directly (no venv needed in container)
-RUN pip install -e ./tools && \
-    pip install -e ./core
+# core must be installed first as tools depends on the 'framework' package (which is core)
+RUN pip install -e ./core && \
+    pip install -e ./tools
 
 # Runtime stage
 FROM python:3.12-slim

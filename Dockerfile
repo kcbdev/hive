@@ -8,7 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     build-essential \
+    ca-certificates \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20 from NodeSource (react-router-dom@7 requires Node 20+)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install uv
 RUN pip install --no-cache-dir uv
@@ -22,6 +29,10 @@ COPY . .
 # core must be installed first as tools depends on the 'framework' package (which is core)
 RUN pip install -e ./core && \
     pip install -e ./tools
+
+# Build the frontend so the server can serve it as an SPA at runtime
+# _build_frontend() runs npm install + npm run build in core/frontend/
+RUN cd /app/core/frontend && npm install --no-fund --no-audit && npm run build
 
 # Runtime stage
 FROM python:3.12-slim

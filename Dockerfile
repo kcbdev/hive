@@ -40,19 +40,18 @@ RUN useradd -m -u 1000 hive && \
 
 WORKDIR /app
 
-# Copy installed packages from builder
-# Packages are installed to system Python (no venv)
+# Copy source and install packages in runtime stage
+# NOTE: pip install in runtime, not just builder. The builder stage only
+# copies source dirs (/app/core, /app/tools) — NOT the installed deps from
+# site-packages. Installing here ensures Python finds pydantic etc. at runtime.
 COPY --from=builder /app/core /app/core
 COPY --from=builder /app/tools /app/tools
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
-
-# Create exports directory if it doesn't exist (may be empty in fresh clones)
-RUN mkdir -p /app/exports && chown hive:hive /app/exports
-
-# Copy Hive CLI scripts
 COPY --from=builder /app/hive /app/hive
 COPY --from=builder /app/quickstart.sh /app/quickstart.sh
-RUN chmod +x /app/hive /app/quickstart.sh
+
+RUN pip install --no-cache-dir -e /app/core && \
+    pip install --no-cache-dir -e /app/tools
 
 # Set environment variables
 ENV PYTHONPATH=/app/core:/app/exports:/app/tools \

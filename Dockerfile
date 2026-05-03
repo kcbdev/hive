@@ -65,12 +65,6 @@ USER hive
 # Create workspace directory
 RUN mkdir -p /home/hive/.hive/workspace
 
-# Health check endpoint (if agent runs HTTP server)
-# For background workers, this will be disabled in Coolify config
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health 2>/dev/null || exit 0
-
-# Default command - runs Hive framework
-# Override in Coolify with your specific agent command
-# Example: python -m framework.agents.cinestory_engine run
-CMD ["python", "-m", "framework", "--help"]
+# Default command — keep container alive (http server not started by default)
+# Override CMD in Coolify to: python -m framework serve [args]
+CMD ["tail", "-f", "/dev/null"]
